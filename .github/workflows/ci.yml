@@ -4,8 +4,9 @@ on:
   pull_request:
   push:
     branches:
-      - main
-      - master
+      # - main
+      # - master
+      - unknown
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
