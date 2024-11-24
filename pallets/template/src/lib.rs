@@ -124,6 +124,8 @@ mod test {
     #[test]
     fn should_mint_unsafe() {
         TestState::new_empty().execute_with(|| {
+            System::set_block_number(1);
+
             assert_eq!(pallet_currency::BalanceOf::<Runtime>::get(1), None);
             assert_eq!(pallet_currency::TotalIssuance::<Runtime>::get(), None);
 
@@ -140,10 +142,6 @@ mod test {
             assert_eq!(pallet_currency::BalanceOf::<Runtime>::get(1), Some(100));
             assert_eq!(pallet_currency::TotalIssuance::<Runtime>::get(), Some(100));
 
-            // @TODO: idk why `events` weren't captured 
-            // assertion `left == right` failed
-            // left: 0
-            // right: 1
             let events = System::events();
             assert_eq!(events.len(), 1);
             System::assert_has_event(pallet_currency::Event::Mint { to: DEST, amount: AMOUNT }.into());
@@ -164,6 +162,7 @@ mod test {
     #[test]
     fn should_transfer()  {
         TestState::new_empty().execute_with(|| {
+            System::set_block_number(1);
             assert_ok!(pallet_currency::Pallet::<Runtime>::mint_unsafe(
                 RuntimeOrigin::signed(1),
                 1,
@@ -182,8 +181,6 @@ mod test {
                 TO,
                 AMOUNT
             ));
-            // @TODO: idk why `events` weren't captured 
-            // "expected event RuntimeEvent::Currency(Event::Transfer { from: 1, to: 2, amount: 50 }) not found in events []"
             System::assert_has_event(pallet_currency::Event::Transfer { from: FROM, to: TO, amount: AMOUNT }.into());
 
             assert_eq!(pallet_currency::BalanceOf::<Runtime>::get(2), Some(50));
