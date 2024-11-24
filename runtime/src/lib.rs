@@ -15,7 +15,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! A minimal runtime that includes the template [`pallet`](`pallet_minimal_template`).
+//! A minimal runtime that includes the template [`pallet_currency`](`pallet_minimal_template`).
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
@@ -158,6 +158,8 @@ impl pallet_transaction_payment::Config for Runtime {
 
 // Implements the types required for the template pallet.
 impl pallet_minimal_template::Config for Runtime {
+    type RuntimeEvent = RuntimeEvent;
+
     fn min_amount() -> pallet_minimal_template::Balance {
         1
     }

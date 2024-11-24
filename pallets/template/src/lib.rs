@@ -20,22 +20,24 @@ pub mod pallet {
 
 	#[pallet::config]
 	pub trait Config: polkadot_sdk::frame_system::Config {
+		type RuntimeEvent: From<Event<Self>> + IsType<<Self as polkadot_sdk::frame_system::Config>::RuntimeEvent>;
+
         fn min_amount() -> Balance;
     }
 
-    // #[pallet::event]
-    // #[pallet::generate_deposit(pub(super) fn deposit_event)]
-    // pub enum Event<T: Config> {
-    //     Mint { to: T::AccountId, amount: Balance},
-    //     Transfer { from: T::AccountId, to: T::AccountId, amount: Balance},
-    // }
+  	#[pallet::event]
+	#[pallet::generate_deposit(pub(super) fn deposit_event)]
+	pub enum Event<T: Config> {
+        Mint { to: T::AccountId, amount: Balance },
+        Transfer { from: T::AccountId, to: T::AccountId, amount: Balance },
+    }
 
-    // #[pallet::error]
-    // pub enum Error<T> { 
-    //     InsufficientFunds,
-    //     NonExistentAccount,
-    //     BelowMinAmount
-    // }
+    #[pallet::error]
+    pub enum Error<T> { 
+        InsufficientBalance,
+        NonExistentAccount,
+        BelowMinAmount
+    }
 
     #[pallet::storage]
     pub type TotalIssuance<T: Config> = StorageValue<_, Balance>;
@@ -53,14 +55,14 @@ pub mod pallet {
             // ensure that this is a signed account, but we don't really check `_who`.
             let _who = ensure_signed(origin)?;
 
-            ensure!(amount >= T::min_amount(), "BelowMinAmount");
+            ensure!(amount >= T::min_amount(), Error::<T>::BelowMinAmount);
 
             // update the `BalanceOf` map. Notice how all `<T: Config>` remains as `<T>`.
-            BalanceOf::<T>::mutate(dest, |b| *b = Some(b.unwrap_or(0) + amount));
+            BalanceOf::<T>::mutate(dest.clone(), |b| *b = Some(b.unwrap_or(0) + amount));
             // update total issuance.
             TotalIssuance::<T>::mutate(|t| *t = Some(t.unwrap_or(0) + amount));
         
-			// Self::deposit_event(Event::Mint { to: dest, amount: amount });
+			Self::deposit_event(Event::Mint { to: dest, amount: amount });
 
             Ok(())
         }
@@ -74,14 +76,14 @@ pub mod pallet {
             let sender = ensure_signed(origin)?;
 
             // ensure sender has enough balance, and if so, calculate what is left after `amount`.
-            let sender_balance = BalanceOf::<T>::get(&sender).ok_or("NonExistentAccount")?;
-           	let remainder = sender_balance.checked_sub(amount).ok_or("InsufficientBalance")?;
+            let sender_balance = BalanceOf::<T>::get(&sender).ok_or(Error::<T>::NonExistentAccount)?;
+           	let remainder = sender_balance.checked_sub(amount).ok_or(Error::<T>::InsufficientBalance)?;
 
             // update sender and dest `BalanceOf`.
-            BalanceOf::<T>::mutate(dest, |b| *b = Some(b.unwrap_or(0) + amount));
+            BalanceOf::<T>::mutate(dest.clone(), |b| *b = Some(b.unwrap_or(0) + amount));
             BalanceOf::<T>::insert(&sender, remainder);
 
-            // Self::deposit_event(Event::Transfer { from: sender, to: dest, amount });
+            Self::deposit_event(Event::Transfer { from: sender, to: dest, amount: amount });
 
             Ok(())
         }
@@ -95,12 +97,12 @@ mod test {
 	// bring in all pallet items
 	use super::pallet as pallet_currency;
 
-    construct_runtime! {
-        pub enum Runtime {
+    construct_runtime!(
+        pub struct Runtime {
             System: frame_system,
-            Currency: pallet_currency
+            Currency: pallet_currency,
         }
-    }
+    );
 
 
 	#[derive_impl(frame_system::config_preludes::TestDefaultConfig)]
@@ -112,19 +114,19 @@ mod test {
 	}
 
     impl pallet_currency::Config for Runtime {
+        type RuntimeEvent = RuntimeEvent;
+
         fn min_amount() -> pallet_currency::Balance {
             1
         }
     }
 
     #[test]
-    fn should_mint_unsafe_work() {
+    fn should_mint_unsafe() {
         TestState::new_empty().execute_with(|| {
-            // We expect Alice's account to have no funds.
             assert_eq!(pallet_currency::BalanceOf::<Runtime>::get(1), None);
             assert_eq!(pallet_currency::TotalIssuance::<Runtime>::get(), None);
 
-            // mint some funds into Alice's account.
             assert_ok!(pallet_currency::Pallet::<Runtime>::mint_unsafe(
                 RuntimeOrigin::signed(1),
                 1,
@@ -138,11 +140,65 @@ mod test {
     }
 
     #[test]
-    fn should_mint_unsafe_below_min_amount()  {
+    fn should_not_mint_unsafe_below_min_amount()  {
         TestState::new_empty().execute_with(|| {
             assert_noop!(
                 pallet_currency::Pallet::<Runtime>::mint_unsafe(RuntimeOrigin::signed(1), 2, 0),
-                "BelowMinAmount"
+                pallet_currency::Error::<Runtime>::BelowMinAmount
+            );
+        });
+    }
+
+
+    #[test]
+    fn should_transfer()  {
+        TestState::new_empty().execute_with(|| {
+            assert_ok!(pallet_currency::Pallet::<Runtime>::mint_unsafe(
+                RuntimeOrigin::signed(1),
+                1,
+                100
+            ));
+
+            assert_eq!(pallet_currency::BalanceOf::<Runtime>::get(1), Some(100));
+            assert_eq!(pallet_currency::TotalIssuance::<Runtime>::get(), Some(100));
+
+            assert_ok!(pallet_currency::Pallet::<Runtime>::transfer(
+                RuntimeOrigin::signed(1),
+                2,
+                50
+            ));
+
+            assert_eq!(pallet_currency::BalanceOf::<Runtime>::get(2), Some(50));
+        });
+    }
+
+    #[test]
+    fn should_not_transfer_insufficient_balance()  {
+        TestState::new_empty().execute_with(|| {
+            assert_ok!(pallet_currency::Pallet::<Runtime>::mint_unsafe(
+                RuntimeOrigin::signed(1),
+                1,
+                100
+            ));
+
+            assert_eq!(pallet_currency::BalanceOf::<Runtime>::get(1), Some(100));
+            assert_eq!(pallet_currency::TotalIssuance::<Runtime>::get(), Some(100));
+
+            assert_noop!(
+                pallet_currency::Pallet::<Runtime>::transfer(RuntimeOrigin::signed(1), 2, 101),
+                pallet_currency::Error::<Runtime>::InsufficientBalance
+            );
+        });
+    }
+
+    #[test]
+    fn should_not_transfer_non_existent_account()  {
+        TestState::new_empty().execute_with(|| {
+            assert_eq!(pallet_currency::BalanceOf::<Runtime>::get(6), None);
+
+            assert_noop!(
+                pallet_currency::Pallet::<Runtime>::transfer(RuntimeOrigin::signed(6), 2, 101),
+                pallet_currency::Error::<Runtime>::NonExistentAccount
             );
         });
     }
